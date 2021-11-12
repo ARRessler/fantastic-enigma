@@ -1,14 +1,16 @@
-const int numtrials = 1e6;
+double ConvolutionIntegral(double,TH1D*,TH1D*);
 
+
+const int numtrials = 1e6;
 
 void LandauGaussian()
 {
-  TF1* funG = new TF1("funG", "gaus", -10, 10);
+  TF1* funG = new TF1("funG", "gaus", -10, 20);
   TF1* funL = new TF1("funL", "landau", -10, 20);
 
-  TH1D* histG = new TH1D("histG", "", 200, -10, 10);
-  TH1D* histL = new TH1D("histL", "", 200, -10, 20);
-  TH1D* histC = new TH1D("histC", "", 200, -10, 20);
+  TH1D* histG = new TH1D("histG", "", 300, -10, 20);
+  TH1D* histL = new TH1D("histL", "", 300, -10, 20);
+  TH1D* histCombine = new TH1D("histCombine", "", 300, -10, 20);
 
   funG->SetParameter(0,1.0);
   funG->SetParameter(1,0.0);
@@ -17,29 +19,40 @@ void LandauGaussian()
   funL->SetParameter(1,0.0);
   funL->SetParameter(2,1.0);
 
-
   for(int i = 0; i<numtrials; ++i)
     {
       double G = funG -> GetRandom();
       double L = funL -> GetRandom();
       double C = G+L;
-      // double C = G*L;
       histG -> Fill(G);
       histL -> Fill(L);
-      histC -> Fill(C);
+      histCombine -> Fill(C);
+    }
+
+  TH1D* histConvolve = new TH1D("histConvolve", "", 300, -10, 20);
+
+  for ( int i = 0; i < histConvolve->GetNbinsX(); ++i)
+    {
+      double t = histConvolve->GetBinCenter(i+1);
+      double convolution = ConvolutionIntegral(t,histG,histL);
+      histConvolve->SetBinContent(i+1,convolution);
     }
 
 
   TCanvas* c1 = new TCanvas("c1", "");
 
-  /*
-  //histG -> Draw();
-  //c1 -> Print("figures/lc_histG.png");
-  //histL -> Draw();
-  // c1 -> Print("figures/lc_histL.png");
-  // histC -> Draw();
-  //  c1 -> Print("figures/lc_histC.png");
-  */
+
+  histG -> Draw();
+  c1 -> Print("figures/lc_histG.png");
+  histL -> Draw();
+  c1 -> Print("figures/lc_histL.png");
+  histCombine -> Draw();
+  c1 -> Print("figures/lc_histCombine.png");
+  histConvolve -> Draw();
+  c1 -> Print("figures/lc_histConvole.png");
+
+
+
   TF1 *fgumbel = new TF1("fgumbel","([0]/sqrt(6.28))*TMath::Exp(-0.5*((x-[1])/[2] + TMath::Exp(-(x-[1]/[2]))))",-10,20);
   fgumbel->SetParameter(0,numtrials/100.0);
   fgumbel->SetParameter(1,0.0);
@@ -49,12 +62,13 @@ void LandauGaussian()
   TF1 *funcL = new TF1("funcL","landau",-10, 20);
 
   histG -> Fit("funcG","R");
-  c1 -> Print("figures/lc_hist2G.png");
+  c1 -> Print("figures/lc_histG_fit.png");
   histL -> Fit("funcL","R");
-  c1 -> Print("figures/lc_hist2L.png");
-  //Add extra labels here
-  histC -> Fit("fgumbel", "R");
-  c1 -> Print("figures/lc_hist2C_gumbel.png");
+  c1 -> Print("figures/lc_histL_fit.png");
+  histCombine -> Fit("fgumbel", "R");
+  c1 -> Print("figures/lc_histCombine_fit_gumbel.png");
+  histConvolve -> Fit("fgumbel", "R");
+  c1 -> Print("figures/lc_histConvolve_fit_gumbel.png");
 
   // ---
 
@@ -77,11 +91,14 @@ void LandauGaussian()
   skewgengaus->SetParameter(3,2.2);
   skewgengaus->SetParameter(4,0.1);
 
-  // histC -> Fit("skewgaus", "R");
-  // c1 -> Print("figures/lc_hist2C_skewgaus.png");
+  //histCombine -> Fit("skewgaus", "R");
+  // c1 -> Print("figures/lc_histCombine_skewgaus.png");
 
-  histC -> Fit("skewgengaus", "R");
-  c1 -> Print("figures/lc_hist2C_skewgengaus.png");
+  histCombine -> Fit("skewgengaus", "R");
+  c1 -> Print("figures/lc_histCombine_skewgengaus.png");
+
+  histConvolve -> Fit("skewgengaus", "R");
+  c1 -> Print("figures/lc_histConvolve_skewgengaus.png");
 
   TF1* landaugaus = new TF1("landaugaus","landau(0)*gaus(3)",-10,20);
   landaugaus->SetParameter(0,funL->GetParameter(0));
@@ -91,7 +108,31 @@ void LandauGaussian()
   landaugaus->SetParameter(4,funG->GetParameter(1));
   landaugaus->SetParameter(5,funG->GetParameter(2));
 
-  histC -> Fit("landaugaus", "R");
-  c1 -> Print("figures/lc_hist2C_landaugaus.png");
+  histCombine -> Fit("landaugaus", "R");
+  c1 -> Print("figures/lc_histCombine_landaugaus.png");
 
+  histConvolve -> Fit("landaugaus", "R");
+  c1 -> Print("figures/lc_histConvolve_landaugaus.png");
+
+}
+
+double ConvolutionIntegral(double t, TH1D* hf, TH1D* hg)
+{
+  // limitation is that f and g need to have same range and number of bins...
+  int nbins = hf->GetNbinsX();
+  double lowerlimit = hg->GetBinLowEdge(1);
+  double upperlimit = hg->GetBinLowEdge(nbins+2);
+  double integral = 0;
+  for ( int i = 0; i < nbins; ++i )
+    {
+      double tau = hf->GetBinCenter(i+1);
+      double dtau = hf->GetBinWidth(i+1);
+      double t_tau = t - tau;
+      double f_tau = hf->GetBinContent(hf->FindBin(tau));
+      double g_t_tau = hg->GetBinContent(hg->FindBin(t_tau));
+      double integrand = f_tau * g_t_tau;
+      bool inbounds = ( t_tau > lowerlimit && t_tau < upperlimit );
+      if ( inbounds ) integral += integrand*dtau;
+    }
+  return integral;
 }
